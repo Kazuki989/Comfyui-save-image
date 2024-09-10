@@ -14,7 +14,7 @@ from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad
 
 
-class SaveImage_Encoded:
+class SaveImage_Encrypted:
     """
     A example node
 
@@ -155,7 +155,7 @@ class SaveImage_Encoded:
 
 
 
-class PreviewImage_nosave:
+class PreviewImage_Nosave:
     @classmethod
     def INPUT_TYPES(s):
         return { "required": 
@@ -186,10 +186,7 @@ class PreviewImage_nosave:
 
 
 
-NODE_CLASS_MAPPINGS = {
-    "PreviewImage_nosave": PreviewImage_nosave,
-    "SaveImage_Encoded": SaveImage_Encoded,
-}
+
 
 
 
