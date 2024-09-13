@@ -126,7 +126,7 @@ class SaveImage_Encrypted:
             # Encode image to Base64 and save to separate .txt file
             with open(os.path.join(full_output_folder, f"{file}"), "wb") as txt_file:
                 with io.BytesIO() as buffer:
-                    img.save(buffer, format="PNG")
+                    img.save(buffer, format="PNG", pnginfo=metadata)
                     image_data = buffer.getvalue()
                     encrypted_data = encrypt_data(image_data, key)
                     txt_file.write(encrypted_data)
