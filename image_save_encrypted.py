@@ -1,6 +1,6 @@
 import time
 import folder_paths
-from PIL import Image
+from PIL import Image, ImageOps, ImageSequence
 from PIL.PngImagePlugin import PngInfo
 import json
 import numpy as np
@@ -11,44 +11,13 @@ import folder_paths
 import base64
 import io
 from Crypto.Cipher import AES
-from Crypto.Util.Padding import pad
+from Crypto.Util.Padding import pad, unpad
+import torch
 
+
+###########################################################################################################
 
 class SaveImage_Encrypted:
-    """
-    A example node
-
-    Class methods
-    -------------
-    INPUT_TYPES (dict):
-        Tell the main program input parameters of nodes.
-    IS_CHANGED:
-        optional method to control when the node is re executed.
-
-    Attributes
-    ----------
-    RETURN_TYPES (`tuple`):
-        The type of each element in the output tuple.
-    RETURN_NAMES (`tuple`):
-        Optional: The name of each output in the output tuple.
-    FUNCTION (`str`):
-        The name of the entry-point method. For example, if `FUNCTION = "execute"` then it will run Example().execute()
-    OUTPUT_NODE ([`bool`]):
-        If this node is an output node that outputs a result/image from the graph. The SaveImage node is an example.
-        The backend iterates on these output nodes and tries to execute all their parents if their parent graph is properly connected.
-        Assumed to be False if not present.
-    CATEGORY (`str`):
-        The category the node should appear in the UI.
-    DEPRECATED (`bool`):
-        Indicates whether the node is deprecated. Deprecated nodes are hidden by default in the UI, but remain
-        functional in existing workflows that use them.
-    EXPERIMENTAL (`bool`):
-        Indicates whether the node is experimental. Experimental nodes are marked as such in the UI and may be subject to
-        significant changes or removal in future versions. Use with caution in production workflows.
-    execute(s) -> tuple || None:
-        The entry point method. The name of this method must be the same as the value of property `FUNCTION`.
-        For example, if `FUNCTION = "execute"` then this method's name must be `execute`, if `FUNCTION = "foo"` then it must be `foo`.
-    """
 
     def __init__(self):
         self.output_dir = folder_paths.get_output_directory()
@@ -81,20 +50,6 @@ class SaveImage_Encrypted:
 
 
     def save_images(self, images, filename_prefix="ComfyUI", prompt=None, extra_pnginfo=None):
-
-        """
-        Saves a list of images to the output directory, with the given filename prefix.
-
-        Args:
-            images: A list of tensors, where each tensor is a 3D image (HxWxC)
-            filename_prefix: A string prefix to be used for the filename of each image.
-            prompt: A string prompt to be saved as metadata in the PNG file.
-            extra_pnginfo: A dictionary of extra metadata to be saved in the PNG file.
-
-        Returns:
-            A dictionary with a single key "ui", which contains a list of dictionaries, each containing the filename, subfolder, and type of each image saved.
-        """
-
         
         def encrypt_data(data, key):
             cipher = AES.new(key, AES.MODE_ECB)
@@ -152,7 +107,7 @@ class SaveImage_Encrypted:
 
 
 
-
+###########################################################################################################
 
 
 class PreviewImage_Nosave:
@@ -162,12 +117,12 @@ class PreviewImage_Nosave:
                 { "images": ("IMAGE", ),}
             }
     
-    RETURN_TYPES = ()
     FUNCTION = "preview"
 
     OUTPUT_NODE = True
 
     CATEGORY = "BetterImage"
+    RETURN_TYPES = ("IMAGE",)
 
     def preview(self, images):
         pbar = comfy.utils.ProgressBar(images.shape[0])
@@ -178,22 +133,86 @@ class PreviewImage_Nosave:
             pbar.update_absolute(step, images.shape[0], ("PNG", img, None))
             step += 1
 
-        return {}
+        return (images,)
     
-    def IS_CHANGED(s, images):
-        return time.time()
+
+###########################################################################################################
 
 
+class LoadImage_Encrypted:
+    @classmethod
+    def INPUT_TYPES(s):
+        input_dir = folder_paths.get_input_directory()
+        # List image files in the directory
+        files = [
+            os.path.relpath(os.path.join(root, f), input_dir)
+            for root, _, files_in_dir in os.walk(input_dir, followlinks=True)
+            for f in files_in_dir if os.path.isfile(os.path.join(root, f))
+        ]
+        return {"required": {
+            "image": (sorted(files), {"image_upload": True})}}
 
+    CATEGORY = "BetterImage"
+    RETURN_TYPES = ("IMAGE", "MASK")
+    FUNCTION = "load_image"
 
+    def load_image(self, image):
+        image_path = folder_paths.get_annotated_filepath(image)
 
+        ###
+        try:
+            with open(image_path, 'rb') as f:
+                encrypted_data = f.read()
+                f.close()
+            key = "QWERasdf87654321".encode('utf-8')
+            cipher = AES.new(key, AES.MODE_ECB)
+            ImageBytes = unpad(cipher.decrypt(encrypted_data), AES.block_size)
+            img = Image.open(io.BytesIO(ImageBytes))
+        
+        except Exception as e:
+            print(f'load_image decryption exception: {e}')
+            img = Image.open(image_path)
+            pass
 
+        
+        output_images = []
+        output_masks = []
+        w, h = None, None
 
+        excluded_formats = ['MPO']
+        
+        for i in ImageSequence.Iterator(img):
+            i = ImageOps.exif_transpose(i)
 
+            if i.mode == 'I':
+                i = i.point(lambda i: i * (1 / 255))
+            image = i.convert("RGB")
 
+            if len(output_images) == 0:
+                w = image.size[0]
+                h = image.size[1]
+            
+            if image.size[0] != w or image.size[1] != h:
+                continue
+            
+            image = np.array(image).astype(np.float32) / 255.0
+            image = torch.from_numpy(image)[None,]
+            if 'A' in i.getbands():
+                mask = np.array(i.getchannel('A')).astype(np.float32) / 255.0
+                mask = 1. - torch.from_numpy(mask)
+            else:
+                mask = torch.zeros((64,64), dtype=torch.float32, device="cpu")
+            output_images.append(image)
+            output_masks.append(mask.unsqueeze(0))
 
+        if len(output_images) > 1 and img.format not in excluded_formats:
+            output_image = torch.cat(output_images, dim=0)
+            output_mask = torch.cat(output_masks, dim=0)
+        else:
+            output_image = output_images[0]
+            output_mask = output_masks[0]
 
-
+        return (output_image, output_mask)
 
 
 ###########################################################################################################
