@@ -8,11 +8,10 @@ from PIL import Image, PngImagePlugin
 
 # Ensure the key is exactly 16 bytes (AES-128) by padding or truncating
 key = "QWERasdf87654321".encode('utf-8') # 16 bytes key for AES-128
-input_folder = "F:\\Downloads\\.tmp\\ComfyUI\\output"
-output_folder = "F:\\Downloads\\.tmp\\ComfyUI\\output"  # Adjust the output folder path as needed
+input_folder = os.getcwd() + "\\"
 
 
-def decrypt_aes_image(input_file, output_file):
+def decrypt_aes_image(input_file, output_dir):
     """Decrypts an AES-encrypted image and saves it as a new image file.
 
     Args:
@@ -36,8 +35,8 @@ def decrypt_aes_image(input_file, output_file):
             png_info.add_text(key_, value)
         
         # Save image With Metadata
-        image.save(output_file, pnginfo=png_info)
-        print(f"Saved decrypted image to {output_file}")
+        image.save(input_file, pnginfo=png_info)
+        print(f"Saved decrypted image to {output_dir}")
 
     except (ValueError, KeyError) as e:
         print(f"Passing: {input_file}: {e}")
@@ -56,10 +55,10 @@ def main(input_folder):
     for enc_file in enc_files:
         # Define the output file path based on the input file name
         file_name = os.path.basename(enc_file)
-        output_file = os.path.join(output_folder, file_name)
+        output_file = os.path.join(input_folder, file_name)
 
         # Decrypt the .enc file
         decrypt_aes_image(enc_file, input_folder)
 
 
-main(input_folder, output_folder)
+main(input_folder)
